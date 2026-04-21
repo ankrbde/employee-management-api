@@ -9,6 +9,9 @@ import com.ankrbde.employee_management_api.mapper.EmployeeMapper;
 import com.ankrbde.employee_management_api.repository.EmployeeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
@@ -46,6 +49,28 @@ public class EmployeeService {
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found"));
 
         return EmployeeMapper.toResponse(employee);
+    }
+
+    public Page<EmployeeResponse> getEmployees(int page, int size, UUID departmentId) {
+
+        Pageable pageable = PageRequest.of(page, size);
+
+        Page<Employee> employees;
+
+        if (departmentId != null) {
+            employees = repository.findByStatusAndDepartmentId(
+                    Employee.Status.ACTIVE,
+                    departmentId,
+                    pageable
+            );
+        } else {
+            employees = repository.findByStatus(
+                    Employee.Status.ACTIVE,
+                    pageable
+            );
+        }
+
+        return employees.map(EmployeeMapper::toResponse);
     }
 
     public EmployeeResponse updateEmployee(UUID id, EmployeeRequest request) {
