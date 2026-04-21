@@ -3,6 +3,8 @@ package com.ankrbde.employee_management_api.service;
 import com.ankrbde.employee_management_api.domain.Employee;
 import com.ankrbde.employee_management_api.dto.EmployeeRequest;
 import com.ankrbde.employee_management_api.dto.EmployeeResponse;
+import com.ankrbde.employee_management_api.exception.DuplicateResourceException;
+import com.ankrbde.employee_management_api.exception.ResourceNotFoundException;
 import com.ankrbde.employee_management_api.mapper.EmployeeMapper;
 import com.ankrbde.employee_management_api.repository.EmployeeRepository;
 import lombok.RequiredArgsConstructor;
@@ -40,8 +42,46 @@ public class EmployeeService {
 
     public EmployeeResponse getEmployee(UUID id) {
         Employee employee = repository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Employee not found"));
+                .filter(e -> e.getStatus() == Employee.Status.ACTIVE)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found"));
 
         return EmployeeMapper.toResponse(employee);
+    }
+
+    public EmployeeResponse updateEmployee(UUID id, EmployeeRequest request) {
+
+        Employee employee = repository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found"));
+
+        // Check duplicate email (if changed)
+        if (!employee.getEmail().equals(request.getEmail())) {
+            repository.findByEmail(request.getEmail())
+                    .ifPresent(e -> {
+                        throw new DuplicateResourceException("Email already exists");
+                    });
+        }
+
+        employee.setName(request.getName());
+        employee.setEmail(request.getEmail());
+        employee.setDepartmentId(request.getDepartmentId());
+        employee.setRoleId(request.getRoleId());
+
+        Employee updated = repository.save(employee);
+
+        log.info("Updated employee id={}", id);
+
+        return EmployeeMapper.toResponse(updated);
+    }
+
+    public void deleteEmployee(UUID id) {
+
+        Employee employee = repository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found"));
+
+        employee.setStatus(Employee.Status.INACTIVE);
+
+        repository.save(employee);
+
+        log.info("Soft deleted employee id={}", id);
     }
 }

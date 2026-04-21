@@ -25,4 +25,16 @@ public class EmployeeController {
     public EmployeeResponse getById(@PathVariable UUID id) {
         return service.getEmployee(id);
     }
+
+    @PutMapping("/{id}")
+    public EmployeeResponse update(
+            @PathVariable UUID id,
+            @Valid @RequestBody EmployeeRequest request) {
+        return service.updateEmployee(id, request);
+    }
+
+    @DeleteMapping("/{id}")
+    public void delete(@PathVariable UUID id) {
+        service.deleteEmployee(id);
+    }
 }
