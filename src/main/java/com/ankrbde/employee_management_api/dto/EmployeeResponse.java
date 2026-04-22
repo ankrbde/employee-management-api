@@ -3,12 +3,13 @@ package com.ankrbde.employee_management_api.dto;
 import lombok.Builder;
 import lombok.Data;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Data
 @Builder
-public class EmployeeResponse {
+public class EmployeeResponse implements Serializable {
 
     private UUID id;
     private String name;

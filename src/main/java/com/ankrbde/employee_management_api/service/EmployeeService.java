@@ -9,6 +9,8 @@ import com.ankrbde.employee_management_api.mapper.EmployeeMapper;
 import com.ankrbde.employee_management_api.repository.EmployeeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -43,6 +45,7 @@ public class EmployeeService {
         return EmployeeMapper.toResponse(saved);
     }
 
+    @Cacheable(value = "employees", key = "#id")
     public EmployeeResponse getEmployee(UUID id) {
         Employee employee = repository.findById(id)
                 .filter(e -> e.getStatus() == Employee.Status.ACTIVE)
@@ -73,6 +76,7 @@ public class EmployeeService {
         return employees.map(EmployeeMapper::toResponse);
     }
 
+    @CacheEvict(value = "employees", key = "#id")
     public EmployeeResponse updateEmployee(UUID id, EmployeeRequest request) {
 
         Employee employee = repository.findById(id)
@@ -98,6 +102,7 @@ public class EmployeeService {
         return EmployeeMapper.toResponse(updated);
     }
 
+    @CacheEvict(value = "employees", key = "#id")
     public void deleteEmployee(UUID id) {
 
         Employee employee = repository.findById(id)
