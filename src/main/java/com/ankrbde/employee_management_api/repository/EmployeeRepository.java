@@ -1,6 +1,8 @@
 package com.ankrbde.employee_management_api.repository;
 
 import com.ankrbde.employee_management_api.domain.Employee;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;

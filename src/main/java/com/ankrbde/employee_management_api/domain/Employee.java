@@ -8,7 +8,13 @@ import java.util.UUID;
 
 @Entity
 @Data
-@Table(name = "employees")
+@Table(
+        name = "employees",
+        indexes = {
+                @Index(name = "idx_status", columnList = "status"),
+                @Index(name = "idx_email", columnList = "email")
+        }
+)
 public class Employee {
 
     @Id
