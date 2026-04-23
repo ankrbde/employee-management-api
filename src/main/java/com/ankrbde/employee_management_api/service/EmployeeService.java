@@ -4,6 +4,7 @@ import com.ankrbde.employee_management_api.audit.AuditService;
 import com.ankrbde.employee_management_api.domain.Employee;
 import com.ankrbde.employee_management_api.dto.EmployeeRequest;
 import com.ankrbde.employee_management_api.dto.EmployeeResponse;
+import com.ankrbde.employee_management_api.events.EmployeeEventPublisher;
 import com.ankrbde.employee_management_api.exception.DuplicateResourceException;
 import com.ankrbde.employee_management_api.exception.ResourceNotFoundException;
 import com.ankrbde.employee_management_api.mapper.EmployeeMapper;
@@ -28,6 +29,8 @@ public class EmployeeService {
 
     private final AuditService auditService;
 
+    private final EmployeeEventPublisher eventPublisher;
+
     public EmployeeResponse createEmployee(EmployeeRequest request) {
 
         repository.findByEmail(request.getEmail())
@@ -43,7 +46,11 @@ public class EmployeeService {
 
         Employee saved = repository.save(employee);
 
-        auditService.log(saved.getId(), "CREATE", "Employee created");
+        eventPublisher.publish(
+                "CREATE",
+                saved.getId(),
+                "Employee created"
+        );
 
         return EmployeeMapper.toResponse(saved);
     }
