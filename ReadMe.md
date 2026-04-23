@@ -57,6 +57,15 @@ docker-compose up -d
 
 ```http
 POST /employees
+
+E.g.
+
+curl -X POST http://localhost:8080/employees \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "Test User",
+  "email": "test100@example.com"
+}'
 ```
 
 ### Get Employee by ID
@@ -69,12 +78,25 @@ GET /employees/{id}
 
 ```http
 PUT /employees/{id}
+
+E.g.
+
+curl -X PUT http://localhost:8080/employees/<id> \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "Updated User",
+  "email": "updated100@example.com"
+}' 
 ```
 
 ### Soft Delete Employee
 
 ```http
 DELETE /employees/{id}
+
+E.g.
+
+curl -X DELETE http://localhost:8080/employees/<id>
 ```
 
 ### List Employees (Pagination + Filter)

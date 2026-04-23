@@ -1,5 +1,6 @@
 package com.ankrbde.employee_management_api.service;
 
+import com.ankrbde.employee_management_api.audit.AuditService;
 import com.ankrbde.employee_management_api.domain.Employee;
 import com.ankrbde.employee_management_api.dto.EmployeeRequest;
 import com.ankrbde.employee_management_api.dto.EmployeeResponse;
@@ -25,6 +26,8 @@ public class EmployeeService {
 
     private final EmployeeRepository repository;
 
+    private final AuditService auditService;
+
     public EmployeeResponse createEmployee(EmployeeRequest request) {
 
         repository.findByEmail(request.getEmail())
@@ -40,7 +43,7 @@ public class EmployeeService {
 
         Employee saved = repository.save(employee);
 
-        log.info("Created employee with id={}", saved.getId());
+        auditService.log(saved.getId(), "CREATE", "Employee created");
 
         return EmployeeMapper.toResponse(saved);
     }
@@ -97,7 +100,7 @@ public class EmployeeService {
 
         Employee updated = repository.save(employee);
 
-        log.info("Updated employee id={}", id);
+        auditService.log(id, "UPDATE", "Employee updated");
 
         return EmployeeMapper.toResponse(updated);
     }
@@ -112,6 +115,6 @@ public class EmployeeService {
 
         repository.save(employee);
 
-        log.info("Soft deleted employee id={}", id);
+        auditService.log(id, "DELETE", "Employee soft deleted");
     }
 }

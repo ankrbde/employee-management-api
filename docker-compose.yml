@@ -13,3 +13,8 @@ services:
     container_name: employee-redis
     ports:
       - "6379:6379"
+  mongodb:
+    image: mongo:7
+    container_name: employee-mongo
+    ports:
+      - "27017:27017"
