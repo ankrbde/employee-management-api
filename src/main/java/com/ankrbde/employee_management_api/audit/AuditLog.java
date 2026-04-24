@@ -16,7 +16,7 @@ public class AuditLog {
 
     @Id
     private String id;
-
+    private String eventId;
     private UUID employeeId;
     private String action; // CREATE, UPDATE, DELETE
     private LocalDateTime timestamp;

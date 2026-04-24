@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -12,24 +13,21 @@ import java.util.UUID;
 @Slf4j
 public class EmployeeEventPublisher {
 
-    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
     private static final String TOPIC = "employee-events";
 
     public void publish(String eventType, UUID employeeId, String details) {
 
-        String message = buildMessage(eventType, employeeId, details);
+        EmployeeEvent event = EmployeeEvent.builder()
+                .eventId(UUID.randomUUID().toString())
+                .eventType(eventType)
+                .employeeId(employeeId)
+                .details(details)
+                .build();
 
-        kafkaTemplate.send(TOPIC, message);
+        kafkaTemplate.send(TOPIC, event);
 
-        log.info("Published Kafka event: {}", message);
-    }
-
-    private String buildMessage(String eventType, UUID employeeId, String details) {
-        return "{"
-                + "\"eventType\":\"" + eventType + "\","
-                + "\"employeeId\":\"" + employeeId + "\","
-                + "\"details\":\"" + details + "\""
-                + "}";
+        log.info("Published eventId={} type={}", event.getEventId(), event.getEventType());
     }
 }
