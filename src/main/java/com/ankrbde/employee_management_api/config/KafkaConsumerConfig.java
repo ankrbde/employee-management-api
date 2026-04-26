@@ -1,5 +1,6 @@
 package com.ankrbde.employee_management_api.config;
 
+import com.ankrbde.employee_management_api.audit.error.NonRetryableException;
 import com.ankrbde.employee_management_api.events.EmployeeEvent;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
@@ -11,7 +12,7 @@ import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -56,7 +57,7 @@ public class KafkaConsumerConfig {
         return factory;
     }
     @Bean
-    public DefaultErrorHandler errorHandler(KafkaTemplate<String, Object> kafkaTemplate) {
+    public DefaultErrorHandler errorHandler(KafkaTemplate<String, EmployeeEvent> kafkaTemplate) {
 
         DeadLetterPublishingRecoverer recoverer =
                 new DeadLetterPublishingRecoverer(kafkaTemplate,
@@ -64,9 +65,17 @@ public class KafkaConsumerConfig {
                                 new TopicPartition("employee-events-dlq", record.partition())
                 );
 
-        // retry 3 times, 2 sec gap
-        FixedBackOff backOff = new FixedBackOff(2000L, 3);
+        ExponentialBackOff backOff = new ExponentialBackOff();
+        backOff.setInitialInterval(1000L);
+        backOff.setMultiplier(2.0);
+        backOff.setMaxInterval(10000L);
+        backOff.setMaxElapsedTime(15000L);
 
-        return new DefaultErrorHandler(recoverer, backOff);
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
+
+        // Do NOT retry non-retryable exceptions
+        errorHandler.addNotRetryableExceptions(NonRetryableException.class);
+
+        return errorHandler;
     }
 }

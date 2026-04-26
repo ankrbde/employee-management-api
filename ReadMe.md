@@ -30,6 +30,22 @@ The goal isn’t just to “make it work,” but to **design, build, and iterate
 
 ---
 
+## Architecture Overview
+
+EmployeeService
+↓
+PostgreSQL (Employee Table)
+↓
+Outbox Table (event durability layer)
+↓
+Scheduled Outbox Publisher (@Scheduled polling)
+↓
+Kafka Topic: employee-events
+↓
+Kafka Consumer (Audit Service)
+↓
+Audit Storage (MongoDB / DB)
+
 ## ⚙How to Run Locally
 
 ### 1. Start PostgreSQL
@@ -107,19 +123,76 @@ GET /employees?page=0&size=10&departmentId=<optional>
 
 ---
 
-## Key Design Decisions
+---
 
-### 1. Soft Delete
+## ⚙️ Key Design Patterns Implemented
 
-Instead of deleting records, we mark them as `INACTIVE`.
+### 1. Outbox Pattern
+Ensures **no event loss between DB and Kafka**
 
-Why:
-
-* Preserves history
-* Avoids accidental data loss
-* Common in real systems
+- Events first stored in DB (outbox_events)
+- Publisher asynchronously sends to Kafka
+- Marks events as processed after successful publish
 
 ---
+
+### 2. Event-Driven Architecture
+- Employee service emits domain events
+- Kafka acts as event backbone
+- Consumers independently process events
+
+---
+
+### 3. Idempotent Event Handling
+- Event IDs used for traceability
+- Consumer designed to handle duplicates safely (future enhancement)
+
+---
+
+##  Components
+
+### Employee Service
+- CRUD operations
+- Writes to Employee DB
+- Writes to Outbox table
+
+---
+
+### Outbox Publisher
+- Polls DB every 5 seconds
+- Publishes unprocessed events to Kafka
+- Marks events as processed
+
+---
+
+### Kafka Consumer (Audit Service)
+- Consumes `employee-events`
+- Writes audit logs
+- Logs successful processing
+
+---
+
+## Tested Flows
+
+###  Employee Creation Flow
+1. API call → Employee created
+2. Outbox row created
+3. Publisher sends Kafka event
+4. Consumer receives event
+5. Audit log persisted
+
+---
+
+## Sample Event
+
+```json
+{
+  "eventId": "uuid",
+  "eventType": "CREATE",
+  "employeeId": "uuid",
+  "details": "Employee created"
+}
+```
 
 ### 2. DTO Separation
 

@@ -18,22 +18,17 @@ public class AuditEventConsumer {
     @KafkaListener(topics = "employee-events", groupId = "audit-group")
     public void consume(EmployeeEvent event) {
 
-        log.info("Received eventId={} type={}", event.getEventId(), event.getEventType());
-
-        if (repository.existsByEventId(event.getEventId())) {
-            log.warn("Duplicate event ignored: {}", event.getEventId());
-            return;
-        }
+        log.info("Received eventId={} type={}", event.eventId(), event.eventType());
 
         AuditLog auditLog = AuditLog.builder()
-                .eventId(event.getEventId())
-                .employeeId(event.getEmployeeId())
-                .details(event.getDetails())
+                .eventId(event.eventId())
+                .employeeId(event.employeeId())
+                .action(event.eventType().name())
+                .details(event.details())
                 .timestamp(LocalDateTime.now())
                 .build();
-
         repository.save(auditLog);
 
-        log.info("Audit saved for eventId={}", event.getEventId());
+        log.info("Audit saved for eventId={}", event.eventId());
     }
 }

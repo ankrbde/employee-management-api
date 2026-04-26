@@ -1,23 +1,26 @@
 package com.ankrbde.employee_management_api.service;
 
-import com.ankrbde.employee_management_api.audit.AuditService;
 import com.ankrbde.employee_management_api.domain.Employee;
 import com.ankrbde.employee_management_api.dto.EmployeeRequest;
 import com.ankrbde.employee_management_api.dto.EmployeeResponse;
-import com.ankrbde.employee_management_api.events.EmployeeEventPublisher;
+import com.ankrbde.employee_management_api.events.EmployeeEvent;
+import com.ankrbde.employee_management_api.events.EventType;
 import com.ankrbde.employee_management_api.exception.DuplicateResourceException;
 import com.ankrbde.employee_management_api.exception.ResourceNotFoundException;
 import com.ankrbde.employee_management_api.mapper.EmployeeMapper;
+import com.ankrbde.employee_management_api.outbox.OutboxEvent;
+import com.ankrbde.employee_management_api.outbox.OutboxRepository;
 import com.ankrbde.employee_management_api.repository.EmployeeRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -26,16 +29,14 @@ import java.util.UUID;
 public class EmployeeService {
 
     private final EmployeeRepository repository;
+    private final OutboxRepository outboxRepository;
 
-    private final AuditService auditService;
-
-    private final EmployeeEventPublisher eventPublisher;
-
+    @Transactional
     public EmployeeResponse createEmployee(EmployeeRequest request) {
 
         repository.findByEmail(request.getEmail())
                 .ifPresent(e -> {
-                    throw new RuntimeException("Email already exists");
+                    throw new DuplicateResourceException("Email already exists");
                 });
 
         Employee employee = new Employee();
@@ -46,17 +47,14 @@ public class EmployeeService {
 
         Employee saved = repository.save(employee);
 
-        eventPublisher.publish(
-                "CREATE",
-                saved.getId(),
-                "Employee created"
-        );
+        saveOutboxEvent(EventType.CREATE, saved.getId(), "Employee created");
 
         return EmployeeMapper.toResponse(saved);
     }
 
     @Cacheable(value = "employees", key = "#id")
     public EmployeeResponse getEmployee(UUID id) {
+
         Employee employee = repository.findById(id)
                 .filter(e -> e.getStatus() == Employee.Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found"));
@@ -86,13 +84,13 @@ public class EmployeeService {
         return employees.map(EmployeeMapper::toResponse);
     }
 
+    @Transactional
     @CacheEvict(value = "employees", key = "#id")
     public EmployeeResponse updateEmployee(UUID id, EmployeeRequest request) {
 
         Employee employee = repository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found"));
 
-        // Check duplicate email (if changed)
         if (!employee.getEmail().equals(request.getEmail())) {
             repository.findByEmail(request.getEmail())
                     .ifPresent(e -> {
@@ -107,11 +105,12 @@ public class EmployeeService {
 
         Employee updated = repository.save(employee);
 
-        auditService.log(id, "UPDATE", "Employee updated");
+        saveOutboxEvent(EventType.UPDATE, id, "Employee updated");
 
         return EmployeeMapper.toResponse(updated);
     }
 
+    @Transactional
     @CacheEvict(value = "employees", key = "#id")
     public void deleteEmployee(UUID id) {
 
@@ -119,9 +118,40 @@ public class EmployeeService {
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found"));
 
         employee.setStatus(Employee.Status.INACTIVE);
-
         repository.save(employee);
 
-        auditService.log(id, "DELETE", "Employee soft deleted");
+        saveOutboxEvent(EventType.DELETE, id, "Employee soft deleted");
+    }
+
+    private void saveOutboxEvent(EventType eventType, UUID employeeId, String details) {
+
+        log.info("OUTBOX JOB RUNNING");
+
+        EmployeeEvent event = new EmployeeEvent(
+                UUID.randomUUID().toString(),
+                eventType,
+                employeeId,
+                details
+        );
+
+        try {
+            String payload = new ObjectMapper().writeValueAsString(event);
+
+            OutboxEvent outboxEvent = OutboxEvent.builder()
+                    .eventId(event.eventId())
+                    .eventType(event.eventType())
+                    .aggregateId(employeeId)
+                    .payload(payload)
+                    .createdAt(Instant.now())
+                    .processed(false)
+                    .build();
+
+            outboxRepository.save(outboxEvent);
+
+            log.info("Outbox event saved eventId={} type={}", event.eventId(), event.eventType());
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to serialize event", e);
+        }
     }
 }

@@ -12,8 +12,8 @@ public class DlqConsumer {
     @KafkaListener(topics = "employee-events-dlq", groupId = "dlq-group")
     public void consume(EmployeeEvent event) {
         log.error("DLQ EVENT eventId={} type={}",
-                event.getEventId(),
-                event.getEventType()
+                event.eventId(),
+                event.eventType()
         );
     }
 }
