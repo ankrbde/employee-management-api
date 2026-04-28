@@ -125,7 +125,7 @@ GET /employees?page=0&size=10&departmentId=<optional>
 
 ---
 
-## ⚙️ Key Design Patterns Implemented
+## Key Design Patterns Implemented
 
 ### 1. Outbox Pattern
 Ensures **no event loss between DB and Kafka**
