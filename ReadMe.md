@@ -307,7 +307,7 @@ This project is intentionally built to improve:
 
 This is an evolving project. The focus is:
 
-> consistency > perfection
+> consistency >
 
 Each phase builds toward a **realistic, production-style backend system** rather than a one-off demo.
 
