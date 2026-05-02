@@ -4,10 +4,10 @@ import com.ankrbde.employee_management_api.events.EmployeeEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -18,34 +18,43 @@ public class OutboxPublisher {
 
     private final OutboxRepository outboxRepository;
     private final KafkaTemplate<String, EmployeeEvent> kafkaTemplate;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
+
+    private static final String TOPIC = "employee-events";
 
     @Scheduled(fixedDelay = 5000)
+    @Transactional
     public void publishEvents() {
 
-        List<OutboxEvent> events = outboxRepository.findByProcessedFalse();
+        log.info("OUTBOX JOB RUNNING");
+
+        List<OutboxEvent> events = outboxRepository.fetchUnprocessedBatch(50);
+
+        if (events.isEmpty()) {
+            return;
+        }
 
         for (OutboxEvent event : events) {
+
             try {
-                // 1. Convert payload → EmployeeEvent
                 EmployeeEvent employeeEvent =
                         objectMapper.readValue(event.getPayload(), EmployeeEvent.class);
 
+                log.info("Processing eventId={}", event.getEventId());
+
                 kafkaTemplate.send(
-                        "employee-events",
+                        TOPIC,
                         employeeEvent.eventId(),
                         employeeEvent
                 );
 
-                // 3. Mark as processed ONLY AFTER SUCCESS
                 event.setProcessed(true);
                 outboxRepository.save(event);
 
                 log.info("OUTBOX → Kafka SUCCESS eventId={}", event.getEventId());
 
             } catch (Exception ex) {
-                // DO NOT mark processed → retry will happen
-                log.error("OUTBOX → Kafka FAILED eventId={}", event.getEventId(), ex);
+                log.error("OUTBOX FAILED eventId={}", event.getEventId(), ex);
             }
         }
     }
