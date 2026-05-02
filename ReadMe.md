@@ -127,12 +127,16 @@ GET /employees?page=0&size=10&departmentId=<optional>
 
 ## Key Design Patterns Implemented
 
-### 1. Outbox Pattern
-Ensures **no event loss between DB and Kafka**
+### 1. Outbox Pattern (Production Version)
 
-- Events first stored in DB (outbox_events)
-- Publisher asynchronously sends to Kafka
-- Marks events as processed after successful publish
+The system uses a **Postgres-backed Outbox Pattern with concurrency control**:
+
+### Key Features
+
+- Uses `FOR UPDATE SKIP LOCKED` for safe parallel processing
+- Batch processing of events (configurable size)
+- Transactional publishing with failure isolation
+- Prevents duplicate event processing in multi-instance setups
 
 ---
 
@@ -270,6 +274,12 @@ Indexes added on:
 
 ---
 
+## Limitations (Current Design)
+
+- Polling-based (runs every 5 seconds)
+- Not real-time
+- Requires scheduler overhead
+
 ## Future Experiment
 
 A parallel branch will reimplement this system using **Quarkus** to compare:
@@ -280,35 +290,11 @@ A parallel branch will reimplement this system using **Quarkus** to compare:
 
 ---
 
-## What I’m Practicing
+## Next Step (Planned)
 
-This project is intentionally built to improve:
+Replace polling with **CDC (Change Data Capture)** using Debezium:
 
-* Backend system design thinking
-* Trade-off analysis (not just implementation)
-* Writing production-like code under constraints
-* Explaining decisions clearly (interview readiness)
-
----
-
-## Current Status
-
-✔ CRUD APIs
-✔ Pagination & filtering
-✔ Soft delete
-✔ Exception handling
-✔ Indexing
-
-➡ Next: **Redis caching layer**
-
----
-
-##  Notes
-
-This is an evolving project. The focus is:
-
-> consistency >
-
-Each phase builds toward a **realistic, production-style backend system** rather than a one-off demo.
-
----
+- Stream DB changes directly to Kafka
+- Remove polling completely
+- Near real-time event propagation
+- Industry-standard production pattern
