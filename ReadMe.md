@@ -33,18 +33,18 @@ The goal isn’t just to “make it work,” but to **design, build, and iterate
 ```mermaid
 flowchart LR
 
-A[REST API - Spring Boot] --> B[PostgreSQL - employees table]
-A --> C[PostgreSQL - outbox_events table]
+A[REST API - Spring Boot] --> B[PostgreSQL employees table]
+A --> C[PostgreSQL outbox_events table]
 
-C --> D[Outbox Publisher (Scheduled Worker)]
+C --> D[Outbox Publisher Scheduled Worker]
 D --> E[Kafka Producer]
 
-E --> F[Kafka Topic: employee-events]
+E --> F[Kafka Topic employee-events]
 
 F --> G1[Audit Consumer Service]
 F --> G2[DLQ Consumer Service]
 
-G1 --> H1[MongoDB - audit logs]
+G1 --> H1[MongoDB audit logs]
 G2 --> H2[Dead Letter Handling]
 ```
 
