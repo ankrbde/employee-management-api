@@ -1,6 +1,6 @@
 # Employee Management API
 
-**Production-Style Event-Driven Backend System**
+**Event-Driven Backend System**
 
 ---
 
@@ -8,7 +8,7 @@
 
 This project is a **production-oriented backend system** that demonstrates how a typical CRUD service evolves into a **scalable, event-driven architecture**.
 
-The focus is not just functionality, but **engineering maturity**:
+The focus is:
 
 * Designing for failure
 * Ensuring data consistency across boundaries
@@ -67,7 +67,7 @@ A --> R[Redis Cache]
 
 ---
 
-## Architecture Flow (Write Path)
+## Architecture Flow
 
 1. API request hits `EmployeeService`
 2. Employee is persisted in PostgreSQL
@@ -277,7 +277,7 @@ GET /employees?page=0&size=10&departmentId=<optional>
 
 ---
 
-## Testing Strategy (Current State)
+## Testing Strategy (Current State - needs further improvement)
 
 * Unit tests for service layer (mocked dependencies)
 * Repository tests using JPA test slice
