@@ -27,6 +27,7 @@ The focus is:
 * Redis-based read caching
 * Transactional Outbox Pattern for reliable event publishing
 * Kafka-based event-driven communication
+
 ---
 
 ## Tech Stack
@@ -38,6 +39,7 @@ The focus is:
 * Kafka
 * Lombok
 * Logback
+
 ---
 
 ## Running Locally
@@ -47,6 +49,7 @@ The focus is:
 * Docker and Docker Compose installed
 * Java 17+ and Maven installed (or use the included `./mvnw` wrapper — adjust if this project uses Gradle instead)
 * A DB browser client — e.g. [DBeaver](https://dbeaver.io/) or [pgAdmin](https://www.pgadmin.org/) — for inspecting Postgres tables directly
+
 ### 1. Start the infrastructure (Postgres, Kafka, Redis)
 
 From the project root:
@@ -79,7 +82,8 @@ On startup, check the console for:
 * Successful connection to Kafka (no broker-unreachable errors)
 * Successful connection to Redis
 * The scheduled Outbox Publisher initializing without errors
-  If the app fails to start, the stack trace will usually point to whichever dependency isn't reachable yet — Postgres/Kafka/Redis can take a few seconds after `docker compose up` before they're ready to accept connections, so a restart of the app is sometimes all that's needed.
+
+If the app fails to start, the stack trace will usually point to whichever dependency isn't reachable yet — Postgres/Kafka/Redis can take a few seconds after `docker compose up` before they're ready to accept connections, so a restart of the app is sometimes all that's needed.
 
 ### 3. Verify the database connection using a DB browser
 
@@ -89,6 +93,7 @@ Once connected, you should be able to see and query:
 
 * `employees` — the main entity table
 * `outbox_events` — the outbox table, including the `processed` flag column
+
 ---
 
 ## Testing the Flow End-to-End
@@ -115,6 +120,7 @@ SELECT * FROM outbox_events ORDER BY created_at DESC LIMIT 5;
 
 * Confirm a new row exists in `employees`.
 * Confirm a corresponding row exists in `outbox_events` with `processed = false`.
+
 ### 3. Confirm the outbox event gets published
 
 Wait a few seconds for the scheduled Outbox Publisher to run, then re-run the `outbox_events` query above. The `processed` flag on that row should flip to `true`. If it stays `false`, check the application logs for publisher errors before moving further down the chain.
@@ -124,41 +130,41 @@ Wait a few seconds for the scheduled Outbox Publisher to run, then re-run the `o
 Verify this independently of your own consumers, directly against the topic, using the Kafka console consumer inside the running Kafka container:
 
 ```bash
-docker exec -it kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic employee-events --from-beginning
+docker exec -it kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic employee-events --from-beginning | jq '.'
 ```
 
-This prints every message currently in the `employee-events` topic from the beginning. You should see the JSON event corresponding to the employee you just created (matching the `eventId`/`employeeId` from the outbox row). Leave this running in a separate terminal — it's useful to keep open while testing, so new events appear live as you hit the API.
+This prints every message currently in the `employee-events` topic from the beginning, piped through `jq` for readable, pretty-printed JSON. (Requires `jq` installed locally — `brew install jq` on macOS, `apt install jq` on Debian/Ubuntu.) You should see the JSON event corresponding to the employee you just created (matching the `eventId`/`employeeId` from the outbox row). Leave this running in a separate terminal — it's useful to keep open while testing, so new events appear live as you hit the API.
 
 Press `Ctrl+C` to exit the consumer when done.
 
 ### 5. Confirm the consumers processed the event
 
 Check the application logs for the Audit Consumer and DLQ Consumer around the same timestamp — confirm the Audit Consumer logged that it processed the event, and confirm the corresponding record exists in Audit Storage. The DLQ Consumer should show no activity for a normal, successful flow.
- 
+
 ---
 
 ## System Architecture
 
 ```mermaid
 flowchart LR
- 
+
 A[REST API - Spring Boot] --> B[PostgreSQL employees table]
 A --> C[PostgreSQL outbox_events table]
- 
+
 C --> D[Outbox Publisher Scheduled Worker]
 D --> E[Kafka Producer]
- 
+
 E --> F[Kafka Topic employee-events]
- 
+
 F --> G1[Audit Consumer Service]
 F --> G2[DLQ Consumer Service]
- 
+
 G1 --> H1[Audit Storage]
 G2 --> H2[Dead Letter Handling]
- 
+
 A --> R[Redis Cache]
 ```
- 
+
 ---
 
 ## Architecture Flow
@@ -169,11 +175,13 @@ A --> R[Redis Cache]
 4. Background publisher polls outbox table
 5. Events are published to Kafka
 6. Consumers process events independently
-   This ensures:
+
+This ensures:
 
 * No lost events
 * No dual-write inconsistency
 * Safe retries
+
 ---
 
 ## Key Design Decisions
@@ -187,12 +195,14 @@ Instead of publishing directly to Kafka within the request flow, events are firs
 * Avoids dual-write problems (DB + Kafka inconsistency)
 * Guarantees event durability
 * Enables retries without data loss
-  **Implementation details:**
+
+**Implementation details:**
 
 * `processed = false` flag controls lifecycle
 * Batched polling using a scheduled worker
 * `FOR UPDATE SKIP LOCKED` ensures safe parallel processing
 * Events marked processed only after successful publish
+
 ---
 
 ### 2. Event-Driven Architecture (Kafka)
@@ -200,20 +210,24 @@ Instead of publishing directly to Kafka within the request flow, events are firs
 * Domain events (`EmployeeEvent`) are emitted for all state changes
 * Kafka acts as the central event backbone
 * Consumers are decoupled and independently scalable
-  This allows:
+
+This allows:
 
 * Async workflows
 * Service decoupling
 * Future extensibility (notifications, analytics, etc.)
+
 ---
 
 ### 3. Redis Caching (Read Optimization)
 
 * `@Cacheable` used for employee reads
 * `@CacheEvict` ensures cache consistency on updates/deletes
-  Trade-off:
+
+Trade-off:
 
 * Slight complexity increase for significant read performance gains
+
 ---
 
 ### 4. Soft Delete Strategy
@@ -221,11 +235,13 @@ Instead of publishing directly to Kafka within the request flow, events are firs
 Instead of deleting records:
 
 * Records are marked `INACTIVE`
-  Benefits:
+
+Benefits:
 
 * Preserves history
 * Prevents accidental data loss
 * Aligns with audit/compliance requirements
+
 ---
 
 ### 5. DTO-Based API Design
@@ -237,6 +253,7 @@ Benefits:
 * Prevents tight coupling
 * Enables independent API evolution
 * Avoids ORM-related issues (lazy loading, serialization)
+
 ---
 
 ### 6. Validation Strategy
@@ -245,17 +262,21 @@ Email uniqueness enforced at:
 
 * Application layer (better UX)
 * Database layer (strong consistency)
+
 ---
 
 ### 7. Pagination Strategy
 
 * Offset-based pagination implemented
-  Trade-off:
+
+Trade-off:
 
 * Simple but inefficient for large datasets
-  Planned:
+
+Planned:
 
 * Cursor-based pagination for scalability
+
 ---
 
 ## Components
@@ -265,6 +286,7 @@ Email uniqueness enforced at:
 * Handles CRUD operations
 * Applies business validation
 * Writes to database and outbox
+
 ---
 
 ### Outbox Publisher
@@ -273,6 +295,7 @@ Email uniqueness enforced at:
 * Polls unprocessed events in batches
 * Publishes to Kafka
 * Marks events as processed
+
 ---
 
 ### Kafka Consumers (Audit / DLQ)
@@ -280,12 +303,14 @@ Email uniqueness enforced at:
 * Consume `employee-events`
 * Persist audit logs
 * Handle failure scenarios (DLQ path)
+
 ---
 
 ### Redis Cache
 
 * Speeds up read-heavy operations
 * Keeps frequently accessed data in memory
+
 ---
 
 ## API Endpoints
@@ -304,7 +329,7 @@ curl -X POST http://localhost:8080/employees \
   "email": "test@example.com"
 }'
 ```
- 
+
 ---
 
 ### Get Employee
@@ -312,7 +337,7 @@ curl -X POST http://localhost:8080/employees \
 ```http
 GET /employees/{id}
 ```
- 
+
 ---
 
 ### Update Employee
@@ -320,7 +345,7 @@ GET /employees/{id}
 ```http
 PUT /employees/{id}
 ```
- 
+
 ---
 
 ### Delete Employee (Soft Delete)
@@ -328,7 +353,7 @@ PUT /employees/{id}
 ```http
 DELETE /employees/{id}
 ```
- 
+
 ---
 
 ### List Employees
@@ -336,7 +361,7 @@ DELETE /employees/{id}
 ```http
 GET /employees?page=0&size=10&departmentId=<optional>
 ```
- 
+
 ---
 
 ## Sample Event
@@ -349,7 +374,7 @@ GET /employees?page=0&size=10&departmentId=<optional>
   "details": "Employee created"
 }
 ```
- 
+
 ---
 
 ## Testing Strategy (Current State - needs further improvement)
@@ -357,9 +382,11 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Unit tests for service layer (mocked dependencies)
 * Repository tests using JPA test slice
 * Focus on:
+
   * Validation logic
   * Outbox event creation
   * Soft delete behavior
+
 ---
 
 ## Limitations (Current Design)
@@ -367,6 +394,7 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Polling-based outbox (not real-time)
 * Scheduler introduces latency (few seconds)
 * Single-table outbox may need partitioning at scale
+
 ---
 
 ## Roadmap
@@ -376,6 +404,7 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Cursor-based pagination
 * Partitioned outbox processing
 * Parallel publisher scaling
+
 ---
 
 ### Eventing Evolution
@@ -383,12 +412,14 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Replace polling with CDC (Debezium)
 * Stream database changes directly to Kafka
 * Achieve near real-time propagation
+
 ---
 
 ### Performance
 
 * Advanced Redis strategies (TTL, eviction tuning)
 * Load testing (k6 / JMeter)
+
 ---
 
 ### Observability
@@ -396,6 +427,7 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Metrics (Prometheus + Grafana)
 * Structured logging
 * Distributed tracing
+
 ---
 
 ### Reliability
@@ -403,12 +435,14 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Idempotent consumers
 * Retry + backoff strategies
 * DLQ automation
+
 ---
 
 ### CI/CD
 
 * Integration tests with Testcontainers
 * GitHub Actions pipeline
+
 ---
 
 ## Design Philosophy
@@ -420,11 +454,13 @@ This system is intentionally built to reflect **real-world backend evolution**:
 * Move to asynchronous systems (Kafka)
 * Optimize reads (Redis)
 * Prepare for distributed scaling
-  The emphasis is on:
+
+The emphasis is on:
 
 * Explicit trade-offs
 * Incremental complexity
 * Production readiness over shortcuts
+
 ---
 
 ## Next Step
@@ -435,5 +471,5 @@ Introduce **Change Data Capture (CDC)** using Debezium:
 * Stream DB changes directly to Kafka
 * Reduce latency
 * Align with industry-standard event streaming architectures
+
 ---
- 
