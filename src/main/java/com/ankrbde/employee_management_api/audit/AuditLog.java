@@ -2,6 +2,7 @@ package com.ankrbde.employee_management_api.audit;
 
 import lombok.*;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
@@ -16,6 +17,7 @@ public class AuditLog {
 
     @Id
     private String id;
+    @Indexed(unique = true)
     private String eventId;
     private UUID employeeId;
     private String action; // CREATE, UPDATE, DELETE
