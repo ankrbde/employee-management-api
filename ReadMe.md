@@ -27,7 +27,6 @@ The focus is:
 * Redis-based read caching
 * Transactional Outbox Pattern for reliable event publishing
 * Kafka-based event-driven communication
-
 ---
 
 ## Tech Stack
@@ -39,7 +38,46 @@ The focus is:
 * Kafka
 * Lombok
 * Logback
+---
 
+
+## System Architecture
+
+```mermaid
+flowchart LR
+ 
+A[REST API - Spring Boot] --> B[PostgreSQL employees table]
+A --> C[PostgreSQL outbox_events table]
+ 
+C --> D[Outbox Publisher Scheduled Worker]
+D --> E[Kafka Producer]
+ 
+E --> F[Kafka Topic employee-events]
+ 
+F --> G1[Audit Consumer Service]
+F --> G2[DLQ Consumer Service]
+ 
+G1 --> H1[Audit Storage]
+G2 --> H2[Dead Letter Handling]
+ 
+A --> R[Redis Cache]
+```
+ 
+---
+
+## Architecture Flow
+
+1. API request hits `EmployeeService`
+2. Employee is persisted in PostgreSQL
+3. A corresponding event is written to `outbox_events` (same transaction)
+4. Background publisher polls outbox table
+5. Events are published to Kafka
+6. Consumers process events independently
+   This ensures:
+
+* No lost events
+* No dual-write inconsistency
+* Safe retries
 ---
 
 ## Running Locally
@@ -49,7 +87,6 @@ The focus is:
 * Docker and Docker Compose installed
 * Java 17+ and Maven installed (or use the included `./mvnw` wrapper — adjust if this project uses Gradle instead)
 * A DB browser client — e.g. [DBeaver](https://dbeaver.io/) or [pgAdmin](https://www.pgadmin.org/) — for inspecting Postgres tables directly
-
 ### 1. Start the infrastructure (Postgres, Kafka, Redis)
 
 From the project root:
@@ -82,8 +119,7 @@ On startup, check the console for:
 * Successful connection to Kafka (no broker-unreachable errors)
 * Successful connection to Redis
 * The scheduled Outbox Publisher initializing without errors
-
-If the app fails to start, the stack trace will usually point to whichever dependency isn't reachable yet — Postgres/Kafka/Redis can take a few seconds after `docker compose up` before they're ready to accept connections, so a restart of the app is sometimes all that's needed.
+  If the app fails to start, the stack trace will usually point to whichever dependency isn't reachable yet — Postgres/Kafka/Redis can take a few seconds after `docker compose up` before they're ready to accept connections, so a restart of the app is sometimes all that's needed.
 
 ### 3. Verify the database connection using a DB browser
 
@@ -93,7 +129,6 @@ Once connected, you should be able to see and query:
 
 * `employees` — the main entity table
 * `outbox_events` — the outbox table, including the `processed` flag column
-
 ---
 
 ## Testing the Flow End-to-End
@@ -120,7 +155,6 @@ SELECT * FROM outbox_events ORDER BY created_at DESC LIMIT 5;
 
 * Confirm a new row exists in `employees`.
 * Confirm a corresponding row exists in `outbox_events` with `processed = false`.
-
 ### 3. Confirm the outbox event gets published
 
 Wait a few seconds for the scheduled Outbox Publisher to run, then re-run the `outbox_events` query above. The `processed` flag on that row should flip to `true`. If it stays `false`, check the application logs for publisher errors before moving further down the chain.
@@ -140,48 +174,102 @@ Press `Ctrl+C` to exit the consumer when done.
 ### 5. Confirm the consumers processed the event
 
 Check the application logs for the Audit Consumer and DLQ Consumer around the same timestamp — confirm the Audit Consumer logged that it processed the event, and confirm the corresponding record exists in Audit Storage. The DLQ Consumer should show no activity for a normal, successful flow.
-
+ 
 ---
 
-## System Architecture
+## Chaos Testing — Idempotency Verification
 
-```mermaid
-flowchart LR
+This section documents a deliberate failure test run against the Audit Consumer to verify (not just assume) how it behaves when Kafka redelivers messages after a mid-batch crash — and the fix that followed.
 
-A[REST API - Spring Boot] --> B[PostgreSQL employees table]
-A --> C[PostgreSQL outbox_events table]
+### Why this test
 
-C --> D[Outbox Publisher Scheduled Worker]
-D --> E[Kafka Producer]
+The Audit Consumer uses Spring Kafka's default `BATCH` ack mode with no `Acknowledgment` parameter and no `enable-auto-commit` override. Under `BATCH` mode, the consumer offset is committed only **after the entire poll's worth of messages finishes processing** — not after each individual message. This means that if the consumer crashes partway through a batch, **every message in that batch gets redelivered on restart**, including ones that were already fully processed and saved before the crash. The original `consume()` implementation had no check against `eventId` before writing to Audit Storage, so redelivery of an already-processed message meant a genuine duplicate write.
 
-E --> F[Kafka Topic employee-events]
+### Test setup
 
-F --> G1[Audit Consumer Service]
-F --> G2[DLQ Consumer Service]
+A counter-based delay was added to `AuditEventConsumer` to create a controllable pause mid-batch:
 
-G1 --> H1[Audit Storage]
-G2 --> H2[Dead Letter Handling]
-
-A --> R[Redis Cache]
+```java
+private final AtomicInteger counter = new AtomicInteger(0);
+ 
+@KafkaListener(topics = "employee-events", groupId = "audit-group")
+public void consume(EmployeeEvent event) {
+    int currCount = counter.incrementAndGet();
+    log.info("Received message: {}, count: {}", event.details(), currCount);
+ 
+    if (currCount == 4) {
+        log.info("Counter is 4. Sleeping for 50 secs ...");
+        Thread.sleep(50000);
+    }
+ 
+    // ... build and save AuditLog
+}
 ```
 
----
+10 employee-creation requests were fired in quick succession (all landing in a single poll batch, well under Spring Kafka's default `max-poll-records` of 500):
 
-## Architecture Flow
+```bash
+for i in {1..10}; do
+  curl -X POST http://localhost:8080/employees \
+    -H "Content-Type: application/json" \
+    -d "{\"name\": \"Test User $i\", \"email\": \"test$i@example.com\"}"
+done
+```
 
-1. API request hits `EmployeeService`
-2. Employee is persisted in PostgreSQL
-3. A corresponding event is written to `outbox_events` (same transaction)
-4. Background publisher polls outbox table
-5. Events are published to Kafka
-6. Consumers process events independently
+While the consumer was sleeping on message 4, the Spring Boot application process was killed abruptly (`kill -9 <pid>`) — not a graceful shutdown — to simulate a genuine crash mid-batch, before the batch offset could commit.
 
-This ensures:
+### Prediction
 
-* No lost events
-* No dual-write inconsistency
-* Safe retries
+Because `BATCH` ack mode commits once per completed poll, no offset in this batch had been committed at the time of the crash — including for messages 1–3, which had already been processed and saved. Expected outcome on restart:
 
+* All 10 messages redeliver, not just message 4 onward
+* Messages 1, 2, and 3 produce duplicate rows in Audit Storage (already saved once pre-crash, saved again post-crash)
+* Message 4 produces a single clean write (it never completed the first time)
+* Messages 5–10 produce a single clean write each (never processed before the crash)
+### Result — before the fix
+
+Confirmed exactly as predicted: **6 documents in `audit_logs`, corresponding to 3 unique `eventId`s each appearing twice** — one write from before the crash, one from the post-restart redelivery. The remaining 7 events (message 4 plus messages 5–10) each produced a single clean row, for 13 total unique events processed with no gaps.
+
+### The fix
+
+Two changes:
+
+1. **A unique index on `eventId`** at the database level, so duplicate writes are rejected atomically by MongoDB itself rather than relying on an application-level check-then-write (which would be vulnerable to a race condition between the check and the write):
+```java
+    @Indexed(unique = true)
+    private String eventId;
+```
+
+2. **A gotcha worth calling out explicitly**: adding `@Indexed(unique = true)` alone did nothing — Spring Data MongoDB does not create indexes from annotations unless index creation is explicitly enabled. This had to be added to `application.properties`:
+```
+    spring.data.mongodb.auto-index-creation=true
+```
+
+Without this property, the annotation is silently inert — `db.audit_logs.getIndexes()` showed no index on `eventId` at all despite the annotation being present in code, and no error was raised to indicate the omission.
+
+3. **A try/catch around the save**, so a rejected duplicate is logged and the consumer continues rather than crashing on an uncaught exception:
+```java
+    try {
+        repository.save(auditLog);
+    } catch (DuplicateKeyException e) {
+        log.warn("Duplicate record detected: {}", e.getMessage());
+    }
+```
+
+### Result — after the fix
+
+Same chaos test rerun, identical procedure. Result: **10 unique records in `audit_logs`, zero duplicates.** The 3 redelivered messages that previously created duplicates were instead rejected by MongoDB's unique index and logged:
+
+```
+WARN c.a.e.audit.AuditEventConsumer - Duplicate record detected: Write operation error on server localhost:27017. Write error: WriteError{code=11000, message='E11000 duplicate key error collection: employee_audit_db.audit_logs index: eventId dup key: { eventId: "efa44768-12e6-4c23-a62d-4e3188cd8763" }', details={}}.
+```
+
+This log line appeared exactly 3 times — matching the 3 events that had genuinely already been processed before the crash — and the consumer remained healthy and kept processing through each occurrence rather than stopping or entering a retry loop.
+
+### Takeaway
+
+`BATCH` ack mode is all-or-nothing per poll, not per-message — partial progress within a batch is not preserved across a crash. Any consumer relying on `BATCH` mode (or any ack mode where commit timing lags behind processing) needs an idempotency guarantee that doesn't depend on the consumer's own in-memory state, since that state is exactly what a crash destroys. A database-level unique constraint is a stronger guarantee than an application-level existence check, because it's enforced atomically regardless of concurrency, without requiring the consumer to reason about race conditions itself.
+ 
 ---
 
 ## Key Design Decisions
@@ -195,14 +283,12 @@ Instead of publishing directly to Kafka within the request flow, events are firs
 * Avoids dual-write problems (DB + Kafka inconsistency)
 * Guarantees event durability
 * Enables retries without data loss
-
-**Implementation details:**
+  **Implementation details:**
 
 * `processed = false` flag controls lifecycle
 * Batched polling using a scheduled worker
 * `FOR UPDATE SKIP LOCKED` ensures safe parallel processing
 * Events marked processed only after successful publish
-
 ---
 
 ### 2. Event-Driven Architecture (Kafka)
@@ -210,24 +296,20 @@ Instead of publishing directly to Kafka within the request flow, events are firs
 * Domain events (`EmployeeEvent`) are emitted for all state changes
 * Kafka acts as the central event backbone
 * Consumers are decoupled and independently scalable
-
-This allows:
+  This allows:
 
 * Async workflows
 * Service decoupling
 * Future extensibility (notifications, analytics, etc.)
-
 ---
 
 ### 3. Redis Caching (Read Optimization)
 
 * `@Cacheable` used for employee reads
 * `@CacheEvict` ensures cache consistency on updates/deletes
-
-Trade-off:
+  Trade-off:
 
 * Slight complexity increase for significant read performance gains
-
 ---
 
 ### 4. Soft Delete Strategy
@@ -235,13 +317,11 @@ Trade-off:
 Instead of deleting records:
 
 * Records are marked `INACTIVE`
-
-Benefits:
+  Benefits:
 
 * Preserves history
 * Prevents accidental data loss
 * Aligns with audit/compliance requirements
-
 ---
 
 ### 5. DTO-Based API Design
@@ -253,7 +333,6 @@ Benefits:
 * Prevents tight coupling
 * Enables independent API evolution
 * Avoids ORM-related issues (lazy loading, serialization)
-
 ---
 
 ### 6. Validation Strategy
@@ -262,21 +341,17 @@ Email uniqueness enforced at:
 
 * Application layer (better UX)
 * Database layer (strong consistency)
-
 ---
 
 ### 7. Pagination Strategy
 
 * Offset-based pagination implemented
-
-Trade-off:
+  Trade-off:
 
 * Simple but inefficient for large datasets
-
-Planned:
+  Planned:
 
 * Cursor-based pagination for scalability
-
 ---
 
 ## Components
@@ -286,7 +361,6 @@ Planned:
 * Handles CRUD operations
 * Applies business validation
 * Writes to database and outbox
-
 ---
 
 ### Outbox Publisher
@@ -295,7 +369,6 @@ Planned:
 * Polls unprocessed events in batches
 * Publishes to Kafka
 * Marks events as processed
-
 ---
 
 ### Kafka Consumers (Audit / DLQ)
@@ -303,14 +376,12 @@ Planned:
 * Consume `employee-events`
 * Persist audit logs
 * Handle failure scenarios (DLQ path)
-
 ---
 
 ### Redis Cache
 
 * Speeds up read-heavy operations
 * Keeps frequently accessed data in memory
-
 ---
 
 ## API Endpoints
@@ -329,7 +400,7 @@ curl -X POST http://localhost:8080/employees \
   "email": "test@example.com"
 }'
 ```
-
+ 
 ---
 
 ### Get Employee
@@ -337,7 +408,7 @@ curl -X POST http://localhost:8080/employees \
 ```http
 GET /employees/{id}
 ```
-
+ 
 ---
 
 ### Update Employee
@@ -345,7 +416,7 @@ GET /employees/{id}
 ```http
 PUT /employees/{id}
 ```
-
+ 
 ---
 
 ### Delete Employee (Soft Delete)
@@ -353,7 +424,7 @@ PUT /employees/{id}
 ```http
 DELETE /employees/{id}
 ```
-
+ 
 ---
 
 ### List Employees
@@ -361,7 +432,7 @@ DELETE /employees/{id}
 ```http
 GET /employees?page=0&size=10&departmentId=<optional>
 ```
-
+ 
 ---
 
 ## Sample Event
@@ -374,7 +445,7 @@ GET /employees?page=0&size=10&departmentId=<optional>
   "details": "Employee created"
 }
 ```
-
+ 
 ---
 
 ## Testing Strategy (Current State - needs further improvement)
@@ -382,11 +453,9 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Unit tests for service layer (mocked dependencies)
 * Repository tests using JPA test slice
 * Focus on:
-
   * Validation logic
   * Outbox event creation
   * Soft delete behavior
-
 ---
 
 ## Limitations (Current Design)
@@ -394,7 +463,6 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Polling-based outbox (not real-time)
 * Scheduler introduces latency (few seconds)
 * Single-table outbox may need partitioning at scale
-
 ---
 
 ## Roadmap
@@ -404,7 +472,6 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Cursor-based pagination
 * Partitioned outbox processing
 * Parallel publisher scaling
-
 ---
 
 ### Eventing Evolution
@@ -412,14 +479,12 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Replace polling with CDC (Debezium)
 * Stream database changes directly to Kafka
 * Achieve near real-time propagation
-
 ---
 
 ### Performance
 
 * Advanced Redis strategies (TTL, eviction tuning)
 * Load testing (k6 / JMeter)
-
 ---
 
 ### Observability
@@ -427,7 +492,6 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Metrics (Prometheus + Grafana)
 * Structured logging
 * Distributed tracing
-
 ---
 
 ### Reliability
@@ -435,15 +499,12 @@ GET /employees?page=0&size=10&departmentId=<optional>
 * Idempotent consumers
 * Retry + backoff strategies
 * DLQ automation
-
 ---
 
 ### CI/CD
 
 * Integration tests with Testcontainers
-* GitHub Actions pipeline
-
----
+* GitHub Actions pipelin---
 
 ## Design Philosophy
 
@@ -454,13 +515,11 @@ This system is intentionally built to reflect **real-world backend evolution**:
 * Move to asynchronous systems (Kafka)
 * Optimize reads (Redis)
 * Prepare for distributed scaling
-
-The emphasis is on:
+  The emphasis is on:
 
 * Explicit trade-offs
 * Incremental complexity
 * Production readiness over shortcuts
-
 ---
 
 ## Next Step
@@ -471,5 +530,5 @@ Introduce **Change Data Capture (CDC)** using Debezium:
 * Stream DB changes directly to Kafka
 * Reduce latency
 * Align with industry-standard event streaming architectures
-
 ---
+ 
