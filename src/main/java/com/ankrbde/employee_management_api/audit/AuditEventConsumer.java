@@ -3,10 +3,12 @@ package com.ankrbde.employee_management_api.audit;
 import com.ankrbde.employee_management_api.events.EmployeeEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
@@ -15,10 +17,26 @@ public class AuditEventConsumer {
 
     private final AuditLogRepository repository;
 
+    private final AtomicInteger counter = new AtomicInteger(0);
+
     @KafkaListener(topics = "employee-events", groupId = "audit-group")
     public void consume(EmployeeEvent event) {
 
         log.info("Received eventId={} type={}", event.eventId(), event.eventType());
+
+        int currCount = counter.incrementAndGet();
+
+        log.info("Received message: {},count: {}", event.details(), currCount);
+
+        if (currCount == 4) {
+            try {
+                log.info("Counter is 4. Sleeping for 50 secs ...");
+                Thread.sleep(50000);
+            } catch (InterruptedException e){
+                Thread.currentThread().interrupt();
+                log.error("Consumer interrupted during sleep.");
+            }
+        }
 
         AuditLog auditLog = AuditLog.builder()
                 .eventId(event.eventId())
@@ -27,7 +45,11 @@ public class AuditEventConsumer {
                 .details(event.details())
                 .timestamp(LocalDateTime.now())
                 .build();
-        repository.save(auditLog);
+        try {
+            repository.save(auditLog);
+        } catch (DuplicateKeyException e) {
+            log.warn("Duplicate record detected: {}", e.getMessage());
+        }
 
         log.info("Audit saved for eventId={}", event.eventId());
     }
