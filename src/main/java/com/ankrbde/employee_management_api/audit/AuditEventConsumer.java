@@ -17,26 +17,10 @@ public class AuditEventConsumer {
 
     private final AuditLogRepository repository;
 
-    private final AtomicInteger counter = new AtomicInteger(0);
-
     @KafkaListener(topics = "employee-events", groupId = "audit-group")
     public void consume(EmployeeEvent event) {
 
         log.info("Received eventId={} type={}", event.eventId(), event.eventType());
-
-        int currCount = counter.incrementAndGet();
-
-        log.info("Received message: {},count: {}", event.details(), currCount);
-
-        if (currCount == 4) {
-            try {
-                log.info("Counter is 4. Sleeping for 50 secs ...");
-                Thread.sleep(50000);
-            } catch (InterruptedException e){
-                Thread.currentThread().interrupt();
-                log.error("Consumer interrupted during sleep.");
-            }
-        }
 
         AuditLog auditLog = AuditLog.builder()
                 .eventId(event.eventId())
