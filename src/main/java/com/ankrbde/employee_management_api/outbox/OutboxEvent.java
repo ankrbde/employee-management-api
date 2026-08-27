@@ -3,6 +3,7 @@ package com.ankrbde.employee_management_api.outbox;
 import com.ankrbde.employee_management_api.events.EventType;
 import jakarta.persistence.*;
 import lombok.*;
+import org.springframework.data.mongodb.core.index.Indexed;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -18,6 +19,9 @@ public class OutboxEvent {
 
     @Id
     private String eventId;
+
+    @Indexed
+    private String correlationId;
 
     @Enumerated(EnumType.STRING)
     private EventType eventType;
