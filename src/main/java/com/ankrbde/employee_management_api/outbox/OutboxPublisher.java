@@ -4,11 +4,13 @@ import com.ankrbde.employee_management_api.events.EmployeeEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Component
@@ -42,11 +44,15 @@ public class OutboxPublisher {
 
                 log.info("Processing eventId={}", event.getEventId());
 
-                kafkaTemplate.send(
-                        TOPIC,
-                        employeeEvent.eventId(),
-                        employeeEvent
-                );
+                ProducerRecord<String, EmployeeEvent> record =
+                        new ProducerRecord<>(TOPIC, employeeEvent.eventId(), employeeEvent);
+
+                if (event.getCorrelationId() != null) {
+                    record.headers().add("correlationId",
+                            event.getCorrelationId().getBytes(StandardCharsets.UTF_8));
+                }
+
+                kafkaTemplate.send(record);
 
                 event.setProcessed(true);
                 outboxRepository.save(event);
