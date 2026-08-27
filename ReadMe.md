@@ -129,14 +129,28 @@ Once connected, you should be able to see and query:
 
 * `employees` — the main entity table
 * `outbox_events` — the outbox table, including the `processed` flag column
+### Troubleshooting: app hangs on startup / stuck on a Hibernate `alter table` line
+
+If the app hangs indefinitely right after a `Hibernate: alter table ...` log line and never reaches `Started EmployeeManagementApiApplication`, it's likely a **stray duplicate instance** already running and holding a Postgres lock on the same table — easy to end up with if you've started the app from both an IDE run button and a terminal (or forgot a previous run was still alive).
+
+Check for multiple instances:
+
+```bash
+jps -lm
+```
+
+If `EmployeeManagementApiApplication` appears more than once, kill all of them (`kill -9 <pid>` for each) before starting a single fresh instance. Note that `kill -9` can leave orphaned Postgres sessions still holding the lock even after the JVM is gone — if the new instance still hangs, check `pg_stat_activity` for stale sessions and terminate them explicitly with `pg_terminate_backend(<pid>)` before retrying.
+ 
 ---
 
 ## Testing the Flow End-to-End
 
 ### 1. Create an employee via the API
 
+Use `-i` to include response headers — you'll want to see the `X-Correlation-ID` header this returns, which is useful for tracing this specific request through logs and the database later.
+
 ```bash
-curl -X POST http://localhost:8080/employees \
+curl -i -X POST http://localhost:8080/employees \
 -H "Content-Type: application/json" \
 -d '{
   "name": "Test User",
@@ -504,7 +518,8 @@ GET /employees?page=0&size=10&departmentId=<optional>
 ### CI/CD
 
 * Integration tests with Testcontainers
-* GitHub Actions pipelin---
+* GitHub Actions pipeline
+---
 
 ## Design Philosophy
 
@@ -531,4 +546,3 @@ Introduce **Change Data Capture (CDC)** using Debezium:
 * Reduce latency
 * Align with industry-standard event streaming architectures
 ---
- 
