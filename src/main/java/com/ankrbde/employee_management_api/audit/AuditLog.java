@@ -23,4 +23,5 @@ public class AuditLog {
     private String action; // CREATE, UPDATE, DELETE
     private LocalDateTime timestamp;
     private String details;
+    private String correlationId;
 }
