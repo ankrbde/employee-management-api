@@ -14,6 +14,7 @@ import com.ankrbde.employee_management_api.repository.EmployeeRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.*;
@@ -126,6 +127,7 @@ public class EmployeeService {
     private void saveOutboxEvent(EventType eventType, UUID employeeId, String details) {
 
         log.info("OUTBOX JOB RUNNING");
+        String correlationId = MDC.get("correlationId");
 
         EmployeeEvent event = new EmployeeEvent(
                 UUID.randomUUID().toString(),
@@ -139,6 +141,7 @@ public class EmployeeService {
 
             OutboxEvent outboxEvent = OutboxEvent.builder()
                     .eventId(event.eventId())
+                    .correlationId(correlationId)
                     .eventType(event.eventType())
                     .aggregateId(employeeId)
                     .payload(payload)
@@ -148,7 +151,7 @@ public class EmployeeService {
 
             outboxRepository.save(outboxEvent);
 
-            log.info("Outbox event saved eventId={} type={}", event.eventId(), event.eventType());
+            log.info("Outbox event saved eventId={} type={} correlationId={}", event.eventId(), event.eventType(), correlationId);
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to serialize event", e);
