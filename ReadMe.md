@@ -157,6 +157,9 @@ curl -i -X POST http://localhost:8080/employees \
   "email": "test@example.com"
 }'
 ```
+Executing above command should get a response as below screenshot
+
+![img.png](img.png)
 
 ### 2. Check the database for the new records
 
